@@ -13,8 +13,7 @@ const openai = new OpenAI ({
 })
 
 router.post('/signup', async (req: Request, res: Response) => {
-    console.log(req.body);
-  
+
   const { username, password, email } = req.body;
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isPasswordStrong = password.length >= 8;
