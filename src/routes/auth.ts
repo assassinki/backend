@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { error } from 'console';
 import OpenAI from 'openai'
 import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { verifyToken } from '../middleware/auth';
 
 const router = Router();
 const openai = new OpenAI ({
@@ -66,16 +67,16 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/chat', async (req, res) => {
+router.post('/chat', verifyToken, async (req, res) => {
   const { role, content, timestamp }: { role: string; content: string; timestamp: number }  = req.body;
+  const user = req.user;
 
   try {
     //save user message
     await pool.query(
       'INSERT INTO chat_message (sender, content, timestamp) VALUES ($1, $2, $3)',
-      [role, content, timestamp]
+      [user?.username || role, content, timestamp]
     );
-    console.log(content);
     const sendmessage:ChatCompletionMessageParam[] = [
       { role: 'user', content}
     ];
