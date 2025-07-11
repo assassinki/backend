@@ -4,10 +4,15 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import { pool } from './db';
 
+
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin:'http://localhost:3000',
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use('/auth', authRoutes);
@@ -19,6 +24,15 @@ pool.query(`
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     email TEXT NOT NULL
+  );
+`);
+
+pool.query(`
+  CREATE TABLE IF NOT EXISTS chat_message (
+    id SERIAL PRIMARY KEY,
+    sender TEXT  NOT NULL,
+    content TEXT NOT NULL,
+    timestamp TIMESTAMP NOT NULL DEFAULT NOW()
   );
 `);
 
