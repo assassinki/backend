@@ -16,7 +16,6 @@ declare global {
 
 export const verifyToken = (req:Request, res: Response, next: NextFunction): void => {
     const authHeader = req.headers["authorization"];
-    console.log("AuthHeader:", authHeader);
     if(!authHeader) {
         res.status(403).json({message: 'No token provided'});
         return;

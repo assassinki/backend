@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import { pool } from './db';
 
-
 dotenv.config();
 
 const app = express();
@@ -20,19 +19,19 @@ app.use('/auth', authRoutes);
 // Ensure users table exists
 pool.query(`
   CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    email TEXT NOT NULL
+    id UUID PRIMARY KEY,
+    username VARCHAR(100),
+    password VARCHAR(100),
+    email VARCHAR(100)
   );
 `);
 
 pool.query(`
   CREATE TABLE IF NOT EXISTS chat_message (
-    id SERIAL PRIMARY KEY,
-    sender TEXT  NOT NULL,
-    content TEXT NOT NULL,
-    timestamp TIMESTAMP NOT NULL DEFAULT NOW()
+    id UUID PRIMARY KEY,
+    sender VARCHAR(100),
+    content VARCHAR(100),
+    timestamp BIGINT
   );
 `);
 
