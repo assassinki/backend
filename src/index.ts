@@ -31,7 +31,8 @@ pool.query(`
     id UUID PRIMARY KEY,
     sender VARCHAR(100),
     content VARCHAR(100),
-    timestamp BIGINT
+    timestamp VARCHAR(50),
+    user_id UUID REFERENCES users(id)
   );
 `);
 

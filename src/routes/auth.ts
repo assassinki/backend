@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { QueryResult } from 'pg';
 import { pool } from '../db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -12,15 +13,26 @@ const openai = new OpenAI ({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-interface ReqBody {
+interface ReqBodySignup {
   username: string,
   password: string,
   email: string
 }
 
-router.post('/signup', async (req: Request, res: Response) => {
+interface ReqBodyLogin {
+  username: string;
+  password: string;
+}
 
-  const { username, password, email }: ReqBody = req.body;
+interface ReqBodyChat {
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+router.post('/signup', async (req: Request<{}, {}, ReqBodySignup>, res: Response) => {
+
+  const { username, password, email } = req.body;
   const isEmailValid : boolean = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isPasswordStrong : boolean = password.length >= 8;
   if (!isEmailValid) {
@@ -47,7 +59,7 @@ router.post('/signup', async (req: Request, res: Response) => {
  
 });
 
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', async (req: Request<{}, {}, ReqBodyLogin>, res: Response) => {
   const { username, password } = req.body;
   try {
     const result = await pool.query(
@@ -72,39 +84,70 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/chat', verifyToken, async (req, res) => {
-  const { role, content, timestamp }: { role: string; content: string; timestamp: number }  = req.body;
+router.post('/chat', verifyToken, async (req: Request<{}, {}, ReqBodyChat>, res: Response) => {
+  const { role, content, timestamp }: { role: string; content: string; timestamp: string }  = req.body;
   const user = req.user;
 
   try {
     const messageId = uuidv4();
     //save user message
     await pool.query(
-      'INSERT INTO chat_message (id, sender, content, timestamp) VALUES ($1, $2, $3, $4)',
-      [messageId, user?.username || role, content, timestamp]
+      'INSERT INTO chat_message (id, sender, content, timestamp, user_id) VALUES ($1, $2, $3, $4, $5)',
+      [messageId, user?.username || role, content, timestamp, user?.userId]
     );
-    const sendmessage:ChatCompletionMessageParam[] = [
-      { role: 'user', content}
-    ];
+
+    const historyResult: QueryResult<{ sender: string; content: string }> = await pool.query(
+      'SELECT sender, content FROM chat_message WHERE user_id = $1 ORDER BY timestamp ASC', [user?.userId]
+    );
+
+    const fullHistory: ChatCompletionMessageParam[] = historyResult.rows.map(msg => ({
+      role: msg.sender === 'gpt' ? 'assistant': 'user',
+      content: msg.content
+    }));
+    
+    fullHistory.push({role: 'user', content});
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: sendmessage
+      messages: fullHistory,
     });
 
     const reply = completion.choices[0].message.content;
 
     const gptMessageId = uuidv4();
-    
-    await pool.query(
-      'INSERT INTO chat_message (id, sender, content, timestamp) VALUES ($1, $2, $3, $4)',
-      [gptMessageId, 'gpt', reply, timestamp]
-    );
-    res.json({reply});
-  } catch (err) {
-    res.status(500).json({error: 'Something went wrong with OpenAI'});
-  }
 
+    await pool.query(
+      'INSERT INTO chat_message (id, sender, content, timestamp, user_id) VALUES ($1, $2, $3, $4, $5)',
+      [gptMessageId, 'gpt', reply, new Date().toISOString(), user?.userId]
+    );
+
+    res.json({ reply });
+  } catch (err: any) {
+    console.error("/chat error:", err);
+    res.status(500).json({ error: err.message || 'Something went wrong with OpenAI' });
+  }
 })
+
+router.get('/chat/history', verifyToken, async (req: Request, res: Response) => {
+  const user = req.user;
+
+  try {
+    const result: QueryResult<{ sender: string; content: string; timestamp: string }> = await pool.query(
+      'SELECT sender, content, timestamp FROM chat_message WHERE user_id = $1 ORDER BY timestamp ASC',
+      [user?.userId]
+    );
+
+    const messages = result.rows.map((msg) => ({
+      id: uuidv4(),
+      role: msg.sender === 'gpt' ? 'assistant' : 'user',
+      content: msg.content,
+      timestamp: msg.timestamp,
+    }));
+
+    res.json({ messages });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch message history' });
+  }
+});
 
 export default router;

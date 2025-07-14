@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from 'jsonwebtoken';
 
 interface JwtPayload {
-    userId:number;
+    userId:string;
     username: string;
 }
 
@@ -13,7 +13,6 @@ declare global {
         }
     }
 }
-
 export const verifyToken = (req:Request, res: Response, next: NextFunction): void => {
     const authHeader = req.headers["authorization"];
     if(!authHeader) {
