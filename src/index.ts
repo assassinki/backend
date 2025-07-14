@@ -20,19 +20,19 @@ app.use('/auth', authRoutes);
 pool.query(`
   CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
-    username VARCHAR(100),
-    password VARCHAR(100),
-    email VARCHAR(100)
+    username VARCHAR(100) NOT NULL,
+    password VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL
   );
 `);
 
 pool.query(`
   CREATE TABLE IF NOT EXISTS chat_message (
     id UUID PRIMARY KEY,
-    sender VARCHAR(100),
-    content VARCHAR(100),
-    timestamp VARCHAR(50),
-    user_id UUID REFERENCES users(id)
+    sender VARCHAR(100) NOT NULL,
+    content VARCHAR(100) NOT NULL,
+    timestamp VARCHAR(50) NOT NULL, 
+    user_id UUID NOT NULL REFERENCES users(id)
   );
 `);
 
