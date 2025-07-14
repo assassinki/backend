@@ -1,22 +1,40 @@
 import { Router, Request, Response } from 'express';
+import { QueryResult } from 'pg';
 import { pool } from '../db';
-import bcrypt, { compare } from 'bcryptjs';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { error } from 'console';
 import OpenAI from 'openai'
 import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { verifyToken } from '../middleware/auth';
+import {v4 as uuidv4} from 'uuid';
 
 const router = Router();
 const openai = new OpenAI ({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-router.post('/signup', async (req: Request, res: Response) => {
+interface ReqBodySignup {
+  username: string,
+  password: string,
+  email: string
+}
+
+interface ReqBodyLogin {
+  username: string;
+  password: string;
+}
+
+interface ReqBodyChat {
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+router.post('/signup', async (req: Request<{}, {}, ReqBodySignup>, res: Response) => {
 
   const { username, password, email } = req.body;
-  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isPasswordStrong = password.length >= 8;
+  const isEmailValid : boolean = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const isPasswordStrong : boolean = password.length >= 8;
   if (!isEmailValid) {
      res.status(400).json({ error: 'Invalid email' });
   }
@@ -27,21 +45,21 @@ router.post('/signup', async (req: Request, res: Response) => {
   try {
     
     const hashedPassword = await bcrypt.hash(password, 10);
+    const userId = uuidv4();
 
     const result = await pool.query(
-      'INSERT INTO users (username, password, email) VALUES ($1, $2, $3) RETURNING id',
-      [username, hashedPassword, email]
+      'INSERT INTO users (id, username, password, email) VALUES ($1, $2, $3, $4) RETURNING id',
+      [userId, username, hashedPassword, email]
     );
     
     res.status(201).json({ message: 'User created', userId: result.rows[0].id });
   } catch (err) {
-    console.error("Signup error", err);
     res.status(400).json({ error: 'User already exists or invalid data' });
   }
  
 });
 
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', async (req: Request<{}, {}, ReqBodyLogin>, res: Response) => {
   const { username, password } = req.body;
   try {
     const result = await pool.query(
@@ -66,37 +84,70 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/chat', verifyToken, async (req, res) => {
-  const { role, content, timestamp }: { role: string; content: string; timestamp: number }  = req.body;
+router.post('/chat', verifyToken, async (req: Request<{}, {}, ReqBodyChat>, res: Response) => {
+  const { role, content, timestamp }: { role: string; content: string; timestamp: string }  = req.body;
   const user = req.user;
 
   try {
+    const messageId = uuidv4();
     //save user message
     await pool.query(
-      'INSERT INTO chat_message (sender, content, timestamp) VALUES ($1, $2, $3)',
-      [user?.username || role, content, timestamp]
+      'INSERT INTO chat_message (id, sender, content, timestamp, user_id) VALUES ($1, $2, $3, $4, $5)',
+      [messageId, user?.username || role, content, timestamp, user?.userId]
     );
-    const sendmessage:ChatCompletionMessageParam[] = [
-      { role: 'user', content}
-    ];
+
+    const historyResult: QueryResult<{ sender: string; content: string }> = await pool.query(
+      'SELECT sender, content FROM chat_message WHERE user_id = $1 ORDER BY timestamp ASC', [user?.userId]
+    );
+
+    const fullHistory: ChatCompletionMessageParam[] = historyResult.rows.map(msg => ({
+      role: msg.sender === 'gpt' ? 'assistant': 'user',
+      content: msg.content
+    }));
+    
+    fullHistory.push({role: 'user', content});
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: sendmessage
+      messages: fullHistory,
     });
 
     const reply = completion.choices[0].message.content;
-    
-    await pool.query(
-      'INSERT INTO chat_message (sender, content, timestamp) VALUES ($1, $2, $3)',
-      ['gpt', reply, timestamp]
-    );
-    res.json({reply});
-  } catch (err) {
-    console.error('OpenAI Error:', err);
-    res.status(500).json({error: 'Something went wrong with OpenAI'});
-  }
 
+    const gptMessageId = uuidv4();
+
+    await pool.query(
+      'INSERT INTO chat_message (id, sender, content, timestamp, user_id) VALUES ($1, $2, $3, $4, $5)',
+      [gptMessageId, 'gpt', reply, new Date().toISOString(), user?.userId]
+    );
+
+    res.json({ reply });
+  } catch (err: any) {
+    console.error("/chat error:", err);
+    res.status(500).json({ error: err.message || 'Something went wrong with OpenAI' });
+  }
 })
+
+router.get('/chat/history', verifyToken, async (req: Request, res: Response) => {
+  const user = req.user;
+
+  try {
+    const result: QueryResult<{ sender: string; content: string; timestamp: string }> = await pool.query(
+      'SELECT sender, content, timestamp FROM chat_message WHERE user_id = $1 ORDER BY timestamp ASC',
+      [user?.userId]
+    );
+
+    const messages = result.rows.map((msg) => ({
+      id: uuidv4(),
+      role: msg.sender === 'gpt' ? 'assistant' : 'user',
+      content: msg.content,
+      timestamp: msg.timestamp,
+    }));
+
+    res.json({ messages });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch message history' });
+  }
+});
 
 export default router;
